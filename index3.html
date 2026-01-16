@@ -91,51 +91,6 @@
             transition: background-color 0.3s ease;
         }
 
-        .ar-btn {
-            padding: 12px 25px;
-            font-size: 18px;
-            background-color: #e74c3c;
-            color: white;
-            border: none;
-            border-radius: 10px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-
-        .ar-btn:hover {
-            background-color: #c0392b;
-            transform: translateY(-2px);
-            box-shadow: 0 6px 8px rgba(0,0,0,0.15);
-        }
-
-        .ar-btn.active {
-            background-color: #27ae60;
-            box-shadow: 0 0 15px rgba(39, 174, 96, 0.5);
-        }
-
-        #cameraFeed {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            z-index: -1;
-            display: none;
-        }
-
-        .content.ar-mode {
-            background-color: transparent !important;
-        }
-
-        .ar-mode .bottom-bar {
-            background-color: rgba(0, 0, 0, 0.3);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-        }
-
         @media (max-width: 768px) {
             .sidebar {
                 position: absolute;
@@ -170,11 +125,6 @@
             .bottom-bar {
                 padding: 10px;
             }
-
-            .ar-btn {
-                padding: 10px 20px;
-                font-size: 16px;
-            }
         }
 
         .content-overlay {
@@ -206,8 +156,6 @@
     <button class="menu-toggle" id="menuToggle" style="display: none;">☰ เมนู</button>
 
     <div class="content" id="mainContent">
-        <video id="cameraFeed" autoplay playsinline muted></video>
-        
         <div class="iframe-container" id="iframeContainer">
             <iframe id="contentFrame" src="" allow="camera"></iframe>
         </div>
@@ -218,7 +166,7 @@
         </div>
 
         <div class="bottom-bar" id="bottomBar">
-            <button class="ar-btn" id="arBtn">AR</button>
+            <!-- ปุ่ม AR ถูกลบออกแล้ว -->
         </div>
     </div>
 
@@ -233,20 +181,14 @@
     </model-viewer>
 
     <script>
-        let isARMode = false;
         let isPeriodicTableActive = false;
-        let stream = null;
         let currentModel = 'inmeg/c.gltf';
 
-        const arBtn = document.getElementById('arBtn');
-        const mainContent = document.getElementById('mainContent');
-        const cameraFeed = document.getElementById('cameraFeed');
         const sidebar = document.getElementById('sidebar');
         const menuToggle = document.getElementById('menuToggle');
         const periodicBtn = document.getElementById('periodicBtn');
         const iframeContainer = document.getElementById('iframeContainer');
         const contentFrame = document.getElementById('contentFrame');
-        const bottomBar = document.getElementById('bottomBar');
         const modelViewer = document.getElementById('ar-model');
 
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -279,10 +221,6 @@
                 mainContent.classList.add('periodic-table-active');
                 isPeriodicTableActive = true;
                 
-                if (isARMode) {
-                    deactivateAR();
-                }
-                
                 if (isMobile) {
                     sidebar.classList.remove('show');
                 }
@@ -297,101 +235,7 @@
             }
         }
 
-        // ส่งสถานะ AR ไปยัง iframe
-        function updateARStateToIframe(enabled) {
-            if (contentFrame.contentWindow) {
-                contentFrame.contentWindow.postMessage({
-                    type: 'AR_MODE_CHANGED',
-                    enabled: enabled
-                }, '*');
-            }
-        }
-
-        // เปิด AR สำหรับธาตุเฉพาะ (รับจาก iframe)
-        function launchARForElement(elementName) {
-            if (!isARMode) {
-                activateAR();
-            }
-            const modelPath = `inmeg/${elementName}.gltf`;
-            modelViewer.src = modelPath;
-            console.log('🥽 เปิด AR สำหรับธาตุ:', elementName);
-        }
-
-        // รับข้อความจาก iframe
-        window.addEventListener('message', (event) => {
-            if (event.data.type === 'ELEMENT_SELECTED_FOR_AR') {
-                launchARForElement(event.data.element);
-            }
-        });
-
-        async function activateAR() {
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'environment' } 
-                });
-                
-                cameraFeed.srcObject = stream;
-                cameraFeed.style.display = 'block';
-                mainContent.classList.add('ar-mode');
-                arBtn.classList.add('active');
-                arBtn.textContent = 'ปิด AR';
-                isARMode = true;
-                
-                updateARStateToIframe(true);
-                
-                if (currentModel) {
-                    modelViewer.src = currentModel;
-                }
-                
-                if (isMobile) {
-                    sidebar.classList.remove('show');
-                }
-            } catch (err) {
-                console.error('ไม่สามารถเข้าถึงกล้องได้:', err);
-                alert('ไม่สามารถเปิดกล้องได้ กรุณาตรวจสอบสิทธิ์การเข้าถึงกล้อง\n' + err.message);
-            }
-        }
-
-        function deactivateAR() {
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-                stream = null;
-            }
-            cameraFeed.style.display = 'none';
-            mainContent.classList.remove('ar-mode');
-            arBtn.classList.remove('active');
-            arBtn.textContent = 'AR';
-            isARMode = false;
-            
-            updateARStateToIframe(false);
-        }
-
-        arBtn.addEventListener('click', () => {
-            if (isPeriodicTableActive) {
-                togglePeriodicTable();
-                return;
-            }
-            
-            if (!isARMode) {
-                activateAR();
-            } else {
-                deactivateAR();
-            }
-        });
-
-        window.addEventListener('orientationchange', () => {
-            setTimeout(() => {
-                if (isARMode && stream) {
-                    cameraFeed.srcObject = stream;
-                }
-            }, 500);
-        });
-
-        window.addEventListener('beforeunload', () => {
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-            }
-        });
+        // ฟังก์ชันที่เหลือถูกลบออกแล้ว (AR-related functions)
     </script>
 
 </body>
