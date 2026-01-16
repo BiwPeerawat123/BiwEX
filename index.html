@@ -20,14 +20,44 @@
             font-weight: bold;
         }
 
+        /* เพิ่มสไตล์ปุ่ม AR */
+        .ar-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 12px 25px;
+            font-size: 18px;
+            background-color: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            z-index: 100;
+            pointer-events: auto;
+        }
+
+        .ar-btn:hover {
+            background-color: #c0392b;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 8px rgba(0,0,0,0.15);
+        }
+
+        .ar-btn.active {
+            background-color: #27ae60;
+            box-shadow: 0 0 15px rgba(39, 174, 96, 0.5);
+        }
+
         canvas { display: block; }
     </style>
 
     <script type="importmap">
     {
         "imports": {
-            "three": "https://unpkg.com/three@0.160.0/build/three.module.js ",
-            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/ "
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js  ",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/  "
         }
     }
     </script>
@@ -37,6 +67,9 @@
 
 <div id="info">คลิกที่ธาตุเพื่อดูรายละเอียด | หมุน/ซูม เพื่อดูรอบๆ</div>
 <div id="container"></div>
+
+<!-- เพิ่มปุ่ม AR -->
+<button class="ar-btn" id="arBtn">AR</button>
 
 <script type="module">
 import * as THREE from 'three';
@@ -68,7 +101,10 @@ const table = [
 let camera, scene, renderer, controls;
 let raycaster = new THREE.Raycaster();
 let mouse = new THREE.Vector2();
-let arModeEnabled = false; // เพิ่มตัวแปรตรวจสถานะ AR
+let arModeEnabled = false;
+
+// เพิ่มตัวแปรและ elements
+const arBtn = document.getElementById('arBtn');
 
 init();
 animate();
@@ -110,21 +146,17 @@ function init() {
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     
-    // รับข้อความจาก parent (index3.html)
+    // รับข้อความจาก parent
     window.addEventListener('message', (event) => {
         if (event.data.type === 'AR_MODE_CHANGED') {
             arModeEnabled = event.data.enabled;
-            console.log('AR Mode:', arModeEnabled ? 'เปิด' : 'ปิด');
-            
-            if (arModeEnabled) {
-                document.body.style.border = '3px solid #27ae60';
-                document.getElementById('info').textContent = 'คลิกที่ธาตุเพื่อเปิด AR | หมุน/ซูม เพื่อดูรอบๆ';
-            } else {
-                document.body.style.border = 'none';
-                document.getElementById('info').textContent = 'คลิกที่ธาตุเพื่อดูรายละเอียด | หมุน/ซูม เพื่อดูรอบๆ';
-            }
+            updateARButtonUI();
+            updateInfoText();
         }
     });
+
+    // เพิ่ม event listener สำหรับปุ่ม AR
+    arBtn.addEventListener('click', toggleAR);
 
     window.addEventListener('resize', onResize);
     window.addEventListener('click', onClick);
@@ -177,6 +209,35 @@ function createTextTexture(symbol, number, color) {
     ctx.fillText(symbol, c.width / 2, c.height / 2 + 10);
 
     return new THREE.CanvasTexture(c);
+}
+
+// เพิ่มฟังก์ชัน toggle AR
+function toggleAR() {
+    // ส่งข้อความไป parent เพื่อสลับโหมด AR
+    window.parent.postMessage({
+        type: 'TOGGLE_AR_MODE'
+    }, '*');
+}
+
+// เพิ่มฟังก์ชันอัปเดต UI ปุ่ม
+function updateARButtonUI() {
+    if (arModeEnabled) {
+        arBtn.classList.add('active');
+        arBtn.textContent = 'ปิด AR';
+    } else {
+        arBtn.classList.remove('active');
+        arBtn.textContent = 'AR';
+    }
+}
+
+// เพิ่มฟังก์ชันอัปเดตข้อความ info
+function updateInfoText() {
+    const info = document.getElementById('info');
+    if (arModeEnabled) {
+        info.textContent = 'คลิกที่ธาตุเพื่อเปิด AR | หมุน/ซูม เพื่อดูรอบๆ';
+    } else {
+        info.textContent = 'คลิกที่ธาตุเพื่อดูรายละเอียด | หมุน/ซูม เพื่อดูรอบๆ';
+    }
 }
 
 function onClick(e) {
