@@ -91,6 +91,28 @@
             transition: background-color 0.3s ease;
         }
 
+        /* === เพิ่มสไตล์สำหรับ AR === */
+        #cameraFeed {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: -1;
+            display: none;
+        }
+
+        .content.ar-mode {
+            background-color: transparent !important;
+        }
+
+        .ar-mode .bottom-bar {
+            background-color: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+
         @media (max-width: 768px) {
             .sidebar {
                 position: absolute;
@@ -156,6 +178,9 @@
     <button class="menu-toggle" id="menuToggle" style="display: none;">☰ เมนู</button>
 
     <div class="content" id="mainContent">
+        <!-- === เพิ่มกล้องสำหรับ AR === -->
+        <video id="cameraFeed" autoplay playsinline muted></video>
+        
         <div class="iframe-container" id="iframeContainer">
             <iframe id="contentFrame" src="" allow="camera"></iframe>
         </div>
@@ -166,10 +191,11 @@
         </div>
 
         <div class="bottom-bar" id="bottomBar">
-            <!-- ปุ่ม AR ถูกลบออกแล้ว -->
+            <!-- ไม่มีปุ่ม AR เพราะควบคุมจาก iframe แทน -->
         </div>
     </div>
 
+    <!-- === Model Viewer สำหรับ AR === -->
     <model-viewer 
         id="ar-model"
         src="" 
@@ -181,17 +207,21 @@
     </model-viewer>
 
     <script>
+        // === เพิ่มตัวแปรควบคุม AR ===
+        let isARMode = false;
         let isPeriodicTableActive = false;
+        let stream = null;
         let currentModel = 'inmeg/c.gltf';
 
-        const sidebar = document.getElementById('sidebar');
-        const menuToggle = document.getElementById('menuToggle');
-        const periodicBtn = document.getElementById('periodicBtn');
-        const iframeContainer = document.getElementById('iframeContainer');
+        const mainContent = document.getElementById('mainContent');
+        const cameraFeed = document.getElementById('cameraFeed');
         const contentFrame = document.getElementById('contentFrame');
         const modelViewer = document.getElementById('ar-model');
 
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        const menuToggle = document.getElementById('menuToggle');
+        const sidebar = document.getElementById('sidebar');
+
         if (isMobile) {
             menuToggle.style.display = 'block';
         }
@@ -235,7 +265,88 @@
             }
         }
 
-        // ฟังก์ชันที่เหลือถูกลบออกแล้ว (AR-related functions)
+        // === ระบบควบคุม AR ===
+        async function activateAR() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
+                
+                cameraFeed.srcObject = stream;
+                cameraFeed.style.display = 'block';
+                mainContent.classList.add('ar-mode');
+                isARMode = true;
+                
+                // ส่งสถานะไป iframe
+                updateARStateToIframe(true);
+                
+                if (currentModel) {
+                    modelViewer.src = currentModel;
+                }
+                
+                console.log('🥽 AR เปิดใช้งาน');
+            } catch (err) {
+                console.error('ไม่สามารถเข้าถึงกล้องได้:', err);
+                alert('ไม่สามารถเปิดกล้องได้ กรุณาตรวจสอบสิทธิ์การเข้าถึงกล้อง\n' + err.message);
+            }
+        }
+
+        function deactivateAR() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            cameraFeed.style.display = 'none';
+            mainContent.classList.remove('ar-mode');
+            isARMode = false;
+            
+            // ส่งสถานะไป iframe
+            updateARStateToIframe(false);
+            
+            console.log('❌ AR ปิดใช้งาน');
+        }
+
+        function updateARStateToIframe(enabled) {
+            if (contentFrame.contentWindow) {
+                contentFrame.contentWindow.postMessage({
+                    type: 'AR_MODE_CHANGED',
+                    enabled: enabled
+                }, '*');
+            }
+        }
+
+        function launchARForElement(elementName) {
+            if (!isARMode) {
+                activateAR();
+            }
+            const modelPath = `inmeg/${elementName}.gltf`;
+            modelViewer.src = modelPath;
+            console.log('🥽 เปิด AR สำหรับธาตุ:', elementName);
+        }
+
+        // === รับคำสั่งจาก iframe ===
+        window.addEventListener('message', (event) => {
+            // สั่งสลับโหมด AR
+            if (event.data.type === 'TOGGLE_AR_MODE') {
+                if (!isARMode) {
+                    activateAR();
+                } else {
+                    deactivateAR();
+                }
+            }
+            
+            // รับชื่อธาตุที่คลิก
+            if (event.data.type === 'ELEMENT_SELECTED_FOR_AR') {
+                launchARForElement(event.data.element);
+            }
+        });
+
+        // === จัดการเมื่อปิดหน้า ===
+        window.addEventListener('beforeunload', () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        });
     </script>
 
 </body>
