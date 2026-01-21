@@ -2,7 +2,7 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <title>AR Learning Interface</title>
+    <title>Learning Interface</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
         body {
@@ -91,28 +91,6 @@
             transition: background-color 0.3s ease;
         }
 
-        /* === เพิ่มสไตล์สำหรับ AR === */
-        #cameraFeed {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            z-index: -1;
-            display: none;
-        }
-
-        .content.ar-mode {
-            background-color: transparent !important;
-        }
-
-        .ar-mode .bottom-bar {
-            background-color: rgba(0, 0, 0, 0.3);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-        }
-
         @media (max-width: 768px) {
             .sidebar {
                 position: absolute;
@@ -161,10 +139,6 @@
                 height: -webkit-fill-available;
             }
         }
-
-        model-viewer {
-            display: none;
-        }
     </style>
 </head>
 
@@ -178,9 +152,6 @@
     <button class="menu-toggle" id="menuToggle" style="display: none;">☰ เมนู</button>
 
     <div class="content" id="mainContent">
-        <!-- === เพิ่มกล้องสำหรับ AR === -->
-        <video id="cameraFeed" autoplay playsinline muted></video>
-        
         <div class="iframe-container" id="iframeContainer">
             <iframe id="contentFrame" src="" allow="camera"></iframe>
         </div>
@@ -191,32 +162,13 @@
         </div>
 
         <div class="bottom-bar" id="bottomBar">
-            <!-- ไม่มีปุ่ม AR เพราะควบคุมจาก iframe แทน -->
         </div>
     </div>
 
-    <!-- === Model Viewer สำหรับ AR === -->
-    <model-viewer 
-        id="ar-model"
-        src="" 
-        ar 
-        ar-modes="scene-viewer webxr quick-look" 
-        camera-controls 
-        auto-rotate
-        alt="3D Model">
-    </model-viewer>
-
     <script>
-        // === เพิ่มตัวแปรควบคุม AR ===
-        let isARMode = false;
         let isPeriodicTableActive = false;
-        let stream = null;
-        let currentModel = 'inmeg/c.gltf';
-
         const mainContent = document.getElementById('mainContent');
-        const cameraFeed = document.getElementById('cameraFeed');
         const contentFrame = document.getElementById('contentFrame');
-        const modelViewer = document.getElementById('ar-model');
 
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         const menuToggle = document.getElementById('menuToggle');
@@ -230,21 +182,6 @@
             sidebar.classList.toggle('show');
         });
 
-        function detectModelFromIframe() {
-            try {
-                const href = contentFrame.contentWindow.location.href;
-                const pathname = new URL(href).pathname;
-                const filename = pathname.split('/').pop().replace('.html', '');
-                
-                if (filename && filename !== 'index' && filename !== '') {
-                    currentModel = `inmeg/${filename}.gltf`;
-                    console.log('✅ ตรวจพบโมเดล:', currentModel);
-                }
-            } catch (e) {
-                console.log('⚠️ ไม่สามารถเข้าถึง iframe content ได้ (cross-origin)');
-            }
-        }
-
         function togglePeriodicTable() {
             if (!isPeriodicTableActive) {
                 contentFrame.src = 'index.html';
@@ -255,97 +192,17 @@
                     sidebar.classList.remove('show');
                 }
                 
-                contentFrame.onload = detectModelFromIframe;
-                
             } else {
                 contentFrame.src = '';
                 mainContent.classList.remove('periodic-table-active');
                 isPeriodicTableActive = false;
-                contentFrame.onload = null;
             }
         }
 
-        // === ระบบควบคุม AR ===
-        async function activateAR() {
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'environment' } 
-                });
-                
-                cameraFeed.srcObject = stream;
-                cameraFeed.style.display = 'block';
-                mainContent.classList.add('ar-mode');
-                isARMode = true;
-                
-                // ส่งสถานะไป iframe
-                updateARStateToIframe(true);
-                
-                if (currentModel) {
-                    modelViewer.src = currentModel;
-                }
-                
-                console.log('🥽 AR เปิดใช้งาน');
-            } catch (err) {
-                console.error('ไม่สามารถเข้าถึงกล้องได้:', err);
-                alert('ไม่สามารถเปิดกล้องได้ กรุณาตรวจสอบสิทธิ์การเข้าถึงกล้อง\n' + err.message);
-            }
-        }
-
-        function deactivateAR() {
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-                stream = null;
-            }
-            cameraFeed.style.display = 'none';
-            mainContent.classList.remove('ar-mode');
-            isARMode = false;
-            
-            // ส่งสถานะไป iframe
-            updateARStateToIframe(false);
-            
-            console.log('❌ AR ปิดใช้งาน');
-        }
-
-        function updateARStateToIframe(enabled) {
-            if (contentFrame.contentWindow) {
-                contentFrame.contentWindow.postMessage({
-                    type: 'AR_MODE_CHANGED',
-                    enabled: enabled
-                }, '*');
-            }
-        }
-
-        function launchARForElement(elementName) {
-            if (!isARMode) {
-                activateAR();
-            }
-            const modelPath = `inmeg/${elementName}.gltf`;
-            modelViewer.src = modelPath;
-            console.log('🥽 เปิด AR สำหรับธาตุ:', elementName);
-        }
-
-        // === รับคำสั่งจาก iframe ===
+        // รับข้อความจาก iframe (สำหรับ debug เท่านั้น)
         window.addEventListener('message', (event) => {
-            // สั่งสลับโหมด AR
-            if (event.data.type === 'TOGGLE_AR_MODE') {
-                if (!isARMode) {
-                    activateAR();
-                } else {
-                    deactivateAR();
-                }
-            }
-            
-            // รับชื่อธาตุที่คลิก
-            if (event.data.type === 'ELEMENT_SELECTED_FOR_AR') {
-                launchARForElement(event.data.element);
-            }
-        });
-
-        // === จัดการเมื่อปิดหน้า ===
-        window.addEventListener('beforeunload', () => {
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-            }
+            // ยังคงรับ message เพื่อป้องกัน error แต่ไม่ทำอะไร
+            console.log('Message from iframe:', event.data);
         });
     </script>
 
