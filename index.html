@@ -3,13 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>3D Periodic Table - Web Version</title>
+    <title>Periodic Table AR - ตารางธาตุแบบ AR</title>
     <style>
         body { 
             margin: 0; 
             overflow: hidden; 
-            background-color: #ffffff; 
+            background-color: #000; 
             touch-action: none;
+            font-family: 'Sarabun', sans-serif;
+        }
+        
+        /* UI สำหรับโหมดปกติ */
+        #normalUI {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
         }
         
         #info {
@@ -27,6 +38,7 @@
             box-sizing: border-box;
         }
 
+        /* ปุ่ม AR - แสดงตลอดเวลา */
         .ar-btn {
             position: absolute;
             top: 10px;
@@ -52,9 +64,36 @@
             box-shadow: 0 6px 8px rgba(0,0,0,0.15);
         }
 
-        .ar-btn.active {
-            background-color: #27ae60;
-            box-shadow: 0 0 15px rgba(39, 174, 96, 0.5);
+        .ar-btn:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* AR UI */
+        #arUI {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 100;
+            display: none;
+        }
+
+        #arAnnotation {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 10px;
+            font-size: 14px;
+            pointer-events: auto;
+            z-index: 200;
         }
 
         #arStatus {
@@ -67,6 +106,16 @@
             border-radius: 5px;
             font-size: 12px;
             z-index: 100;
+            display: none;
+        }
+
+        /* Canvas สำหรับ AR */
+        #arCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
             display: none;
         }
 
@@ -83,20 +132,33 @@
             "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
             "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
         }
-    }
     </script>
 </head>
 
 <body>
 
-<div id="info">คลิกที่ธาตุเพื่อดูรายละเอียด | หมุน/ซูม เพื่อดูรอบๆ</div>
-<div id="container"></div>
-<button class="ar-btn" id="arBtn">AR</button>
-<div id="arStatus"></div>
+<!-- UI สำหรับโหมดปกติ -->
+<div id="normalUI">
+    <div id="info">คลิกที่ธาตุเพื่อดูรายละเอียด | หรือกดปุ่ม AR เพื่อดูในโลกจริง</div>
+    <div id="container"></div>
+</div>
+
+<!-- Canvas สำหรับ AR -->
+<canvas id="arCanvas"></canvas>
+
+<!-- UI สำหรับโหมด AR -->
+<div id="arUI">
+    <div id="arAnnotation">คลิกที่ธาตุใน AR เพื่อดูรายละเอียด</div>
+    <div id="arStatus"></div>
+</div>
+
+<!-- ปุ่ม AR -->
+<button class="ar-btn" id="arBtn">เปิด AR</button>
 
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { ARButton } from 'three/addons/webxr/ARButton.js';
 
 const categories = {
     "alkaline-earth": { color: "#FFD700" },
@@ -121,99 +183,66 @@ const table = [
     ["Au","79",4,3,"transition",""]
 ];
 
-let camera, scene, renderer, controls;
+let scene, camera, renderer, controls;
 let raycaster = new THREE.Raycaster();
 let mouse = new THREE.Vector2();
-let arModeEnabled = false;
-let hasParent = window.parent !== window;
+let arSession = null;
+let arRenderer = null;
+let selectedElement = null;
 
-// Elements
+// UI Elements
 const arBtn = document.getElementById('arBtn');
+const arCanvas = document.getElementById('arCanvas');
+const arAnnotation = document.getElementById('arAnnotation');
 const arStatus = document.getElementById('arStatus');
-
-// ตรวจสอบว่ารองรับ WebXR หรือไม่
-const isARSupported = async () => {
-    if (!navigator.xr) return false;
-    try {
-        const isSupported = await navigator.xr.isSessionSupported('immersive-ar');
-        return isSupported;
-    } catch (e) {
-        return false;
-    }
-};
+const normalUI = document.getElementById('normalUI');
+const arUI = document.getElementById('arUI');
 
 init();
+setupARButton();
 animate();
 
-async function init() {
+function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0xffffff);
 
-    // ปรับ FOV ตามขนาดจอ
     const isMobile = window.innerWidth < 768;
     camera = new THREE.PerspectiveCamera(
         isMobile ? 60 : 45, 
         window.innerWidth / window.innerHeight, 
-        1, 5000
+        0.1, 5000
     );
     camera.position.set(0, 0, isMobile ? 1500 : 2000);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-    const light = new THREE.DirectionalLight(0xffffff, 0.8);
-    light.position.set(200, 300, 400);
-    scene.add(light);
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.xr.enabled = true; // เปิดใช้ WebXR
+    document.getElementById('container').appendChild(renderer.domElement);
 
-    // ปรับขนาดกล่องตามจอ
+    // สร้างตารางธาตุ
     const scale = isMobile ? 0.7 : 1;
     const boxGeo = new THREE.BoxGeometry(140 * scale, 180 * scale, 40 * scale);
 
     table.forEach(([sym, num, col, row, type, url]) => {
         const color = categories[type].color;
         const tex = createTextTexture(sym, num, color, scale);
-
         const front = new THREE.MeshStandardMaterial({ map: tex });
         const side = new THREE.MeshStandardMaterial({ color });
-
         const cube = new THREE.Mesh(boxGeo, [side, side, side, side, front, side]);
-        cube.position.set(
-            col * 200 * scale - 500 * scale, 
-            -(row * 220 * scale) + 350 * scale, 
-            0
-        );
-        cube.userData = { URL: url, isElement: true, symbol: sym };
+        cube.position.set(col * 200 * scale - 500 * scale, -(row * 220 * scale) + 350 * scale, 0);
+        cube.userData = { URL: url, symbol: sym, isElement: true };
         scene.add(cube);
     });
 
-    // ปรับขนาด backboard
     createBackboard(scale);
-    await createTitleText(scale);
-
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    document.getElementById('container').appendChild(renderer.domElement);
+    createTitleText(scale);
 
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     
-    // รับข้อความจาก parent
-    if (hasParent) {
-        window.addEventListener('message', (event) => {
-            if (event.data.type === 'AR_MODE_CHANGED') {
-                arModeEnabled = event.data.enabled;
-                updateARButtonUI();
-                updateInfoText();
-            }
-        });
-    }
-
-    // เพิ่ม event listener สำหรับปุ่ม AR
-    arBtn.addEventListener('click', toggleAR);
-
     window.addEventListener('resize', onResize);
-    
-    // รองรับ touch events
     renderer.domElement.addEventListener('click', onClick);
     renderer.domElement.addEventListener('mousemove', onHover);
     renderer.domElement.addEventListener('touchstart', onTouch, { passive: false });
@@ -227,27 +256,21 @@ function createBackboard(scale = 1) {
     scene.add(board);
 }
 
-async function createTitleText(scale = 1) {
+function createTitleText(scale = 1) {
     const canvas = document.createElement('canvas');
     const size = Math.floor(1024 * scale);
     canvas.width = size;
     canvas.height = Math.floor(256 * scale);
     const ctx = canvas.getContext('2d');
-
-    // ฟอนต์ responsive
     const fontSize = Math.floor(120 * scale);
     ctx.font = `bold ${fontSize}px Sarabun, Arial, sans-serif`;
     ctx.fillStyle = "#1a2035";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("ตารางธาตุ", canvas.width / 2, canvas.height / 2);
-
     const tex = new THREE.CanvasTexture(canvas);
     const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
-    const mesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(700 * scale, 170 * scale), 
-        mat
-    );
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(700 * scale, 170 * scale), mat);
     mesh.position.set(0, 430 * scale, 5 * scale);
     scene.add(mesh);
 }
@@ -259,100 +282,148 @@ function createTextTexture(symbol, number, color, scale = 1) {
     c.width = width;
     c.height = height;
     const ctx = c.getContext('2d');
-
     ctx.fillStyle = color;
     ctx.fillRect(0, 0, c.width, c.height);
-
-    // ฟอนต์ responsive
     const numberFontSize = Math.floor(42 * scale);
     ctx.font = `bold ${numberFontSize}px Arial, sans-serif`;
     ctx.fillStyle = "#000";
     ctx.fillText(number, 20 * scale, 50 * scale);
-
     const symbolFontSize = Math.floor(120 * scale);
     ctx.font = `bold ${symbolFontSize}px Arial, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(symbol, c.width / 2, c.height / 2 + 10 * scale);
-
     return new THREE.CanvasTexture(c);
 }
 
-// เพิ่มฟังก์ชัน toggle AR
-function toggleAR() {
-    if (hasParent) {
-        // ส่งข้อความไป parent
-        window.parent.postMessage({
-            type: 'TOGGLE_AR_MODE'
-        }, '*');
+// ==================== AR Functions ====================
+
+function setupARButton() {
+    if ('xr' in navigator) {
+        navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+            if (supported) {
+                arBtn.style.display = 'block';
+                arBtn.onclick = () => startAR();
+            } else {
+                arBtn.textContent = 'AR ไม่รองรับ';
+                arBtn.disabled = true;
+                showARStatus('อุปกรณ์ไม่รองรับ AR');
+            }
+        }).catch(() => {
+            arBtn.textContent = 'ตรวจสอบ AR ล้มเหลว';
+            arBtn.disabled = true;
+        });
     } else {
-        // ใช้ WebXR API โดยตรง
-        startWebXRAR();
+        arBtn.textContent = 'WebXR ไม่รองรับ';
+        arBtn.disabled = true;
+        showARStatus('เบราว์เซอร์ไม่รองรับ WebXR');
     }
 }
 
-// เพิ่มฟังก์ชัน WebXR AR
-async function startWebXRAR() {
-    if (!navigator.xr) {
-        showARStatus('เบราว์เซอร์นี้ไม่รองรับ WebXR');
-        return;
-    }
-
+async function startAR() {
     try {
-        const supported = await navigator.xr.isSessionSupported('immersive-ar');
-        if (!supported) {
-            showARStatus('อุปกรณ์นี้ไม่รองรับ AR');
-            return;
-        }
+        showARStatus('กำลังเปิด AR...');
+        
+        // ขอ AR session
+        const session = await navigator.xr.requestSession('immersive-ar', {
+            requiredFeatures: ['hit-test', 'dom-overlay'],
+            optionalFeatures: ['local-floor'],
+            domOverlay: { root: document.body }
+        });
 
-        arModeEnabled = !arModeEnabled;
-        updateARButtonUI();
-        updateInfoText();
+        arSession = session;
+        
+        // ซ่อน UI ปกติ
+        normalUI.style.display = 'none';
+        arBtn.style.display = 'none';
+        
+        // แสดง UI AR
+        arCanvas.style.display = 'block';
+        arUI.style.display = 'block';
+        arAnnotation.style.display = 'block';
 
-        if (arModeEnabled) {
-            showARStatus('กำลังเปิด AR โหมด...');
-            // สามารถเพิ่มโค้ดสำหรับ AR session ได้ที่นี่
-        } else {
+        // สร้าง AR renderer
+        arRenderer = new THREE.WebGLRenderer({
+            canvas: arCanvas,
+            antialias: true,
+            alpha: true
+        });
+        arRenderer.setSize(window.innerWidth, window.innerHeight);
+        arRenderer.setPixelRatio(window.devicePixelRatio);
+        arRenderer.xr.enabled = true;
+        arRenderer.xr.setReferenceSpaceType('local');
+        arRenderer.xr.setSession(session);
+
+        // เริ่ม render loop สำหรับ AR
+        arRenderer.setAnimationLoop(renderAR);
+
+        // เมื่อปิด AR
+        session.addEventListener('end', () => {
+            arSession = null;
+            arCanvas.style.display = 'none';
+            arUI.style.display = 'none';
+            arAnnotation.style.display = 'none';
+            arBtn.style.display = 'block';
+            normalUI.style.display = 'block';
+            arRenderer.setAnimationLoop(null);
             hideARStatus();
-        }
-    } catch (e) {
-        showARStatus('เกิดข้อผิดพลาดในการเปิด AR');
-        console.error(e);
+        });
+
+        hideARStatus();
+
+    } catch (err) {
+        console.error('AR Error:', err);
+        showARStatus('เปิด AR ล้มเหลว: ' + err.message);
+        setTimeout(() => hideARStatus(), 3000);
     }
+}
+
+function renderAR() {
+    if (!arRenderer || !arSession) return;
+    
+    // อัปเดตกล้อง AR
+    if (arRenderer.xr.isPresenting) {
+        const xrCamera = arRenderer.xr.getCamera(camera);
+        
+        // วางตารางธาตุตรงกลาง (1 เมตรหน้ากล้อง)
+        scene.position.set(0, 0, -1);
+        scene.quaternion.set(0, 0, 0, 1);
+    }
+    
+    arRenderer.render(scene, camera);
 }
 
 function showARStatus(message) {
     arStatus.textContent = message;
     arStatus.style.display = 'block';
-    setTimeout(() => hideARStatus(), 3000);
 }
 
 function hideARStatus() {
     arStatus.style.display = 'none';
 }
 
-// เพิ่มฟังก์ชันอัปเดต UI ปุ่ม
-function updateARButtonUI() {
-    if (arModeEnabled) {
-        arBtn.classList.add('active');
-        arBtn.textContent = 'ปิด AR';
-    } else {
-        arBtn.classList.remove('active');
-        arBtn.textContent = 'AR';
-    }
-}
-
-// เพิ่มฟังก์ชันอัปเดตข้อความ info
-function updateInfoText() {
-    const info = document.getElementById('info');
-    if (arModeEnabled) {
-        info.textContent = 'คลิกที่ธาตุเพื่อเปิด AR | หมุน/ซูม เพื่อดูรอบๆ';
-    } else {
-        info.textContent = 'คลิกที่ธาตุเพื่อดูรายละเอียด | หมุน/ซูม เพื่อดูรอบๆ';
-    }
-}
+// ==================== Event Handlers ====================
 
 function onClick(e) {
+    // ในโหมด AR ให้ตรวจจับการคลิกที่ธาตุ
+    if (arSession) {
+        // ใช้ raycaster กับกล้อง AR
+        mouse.x = 0;
+        mouse.y = 0;
+        raycaster.setFromCamera(mouse, camera);
+        const hit = raycaster.intersectObjects(scene.children);
+        
+        if (hit.length && hit[0].object.userData.URL) {
+            const elementUrl = hit[0].object.userData.URL;
+            arAnnotation.textContent = `เลือกธาตุ: ${hit[0].object.userData.symbol} - กำลังเปิดรายละเอียด...`;
+            setTimeout(() => {
+                window.open(elementUrl, '_blank');
+            }, 500);
+        }
+        return;
+    }
+
+    // โหมดปกติ
     mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(mouse, camera);
@@ -360,25 +431,16 @@ function onClick(e) {
     
     if (hit.length && hit[0].object.userData.URL) {
         const elementUrl = hit[0].object.userData.URL;
-        const elementName = elementUrl.replace('.html', '');
-        
-        if (arModeEnabled && hasParent) {
-            window.parent.postMessage({
-                type: 'ELEMENT_SELECTED_FOR_AR',
-                element: elementName
-            }, '*');
-        } else {
-            // เปิดลิงก์ในแท็บใหม่สำหรับมือถือ
-            window.open(elementUrl, '_blank');
-        }
+        window.open(elementUrl, '_blank');
     }
 }
 
 function onTouch(e) {
     e.preventDefault();
     const touch = e.touches[0];
-    mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(mouse, camera);
     const hit = raycaster.intersectObjects(scene.children);
     
@@ -392,12 +454,13 @@ function onTouch(e) {
 }
 
 function onHover(e) {
+    if (arSession) return; // ไม่ต้อง hover ในโหมด AR
+    
     mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(mouse, camera);
     const hit = raycaster.intersectObjects(scene.children);
-    document.body.style.cursor =
-        hit.length && hit[0].object.userData.URL ? 'pointer' : 'default';
+    document.body.style.cursor = hit.length && hit[0].object.userData.URL ? 'pointer' : 'default';
 }
 
 function onResize() {
@@ -407,12 +470,18 @@ function onResize() {
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    
+    if (arRenderer) {
+        arRenderer.setSize(window.innerWidth, window.innerHeight);
+    }
 }
 
 function animate() {
     requestAnimationFrame(animate);
     controls.update();
-    renderer.render(scene, camera);
+    if (!arSession) {
+        renderer.render(scene, camera);
+    }
 }
 </script>
 
